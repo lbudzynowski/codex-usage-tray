@@ -1,5 +1,7 @@
 """Core data types and formatting helpers for Codex Usage Tray."""
 
+__version__ = "0.1.0"
+
 from .formatting import (
     format_reset_timestamp,
     format_window_duration,
@@ -14,6 +16,7 @@ from .models import (
 )
 
 __all__ = [
+    "__version__",
     "RateLimitSnapshot",
     "RateLimitValidationError",
     "RateLimitWindow",

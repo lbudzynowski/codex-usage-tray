@@ -1,0 +1,28 @@
+.TH CODEX-USAGE-TRAY 1 "July 2026" "codex-usage-tray 0.1.0" "User Commands"
+.SH NAME
+codex-usage-tray \- display OpenAI Codex usage limits in the Ubuntu system tray
+.SH SYNOPSIS
+.B codex-usage-tray
+.SH DESCRIPTION
+.B codex-usage-tray
+starts an unofficial GTK 3 AppIndicator application that reads usage limits
+from the local OpenAI Codex app-server and displays the remaining allowance
+in the Ubuntu GNOME top panel.
+.PP
+OpenAI Codex must be installed and authenticated separately.
+.SH FILES
+.TP
+.I /etc/xdg/autostart/codex-usage-tray.desktop
+System-wide autostart entry used to launch the application after login.
+.SH REQUIREMENTS
+Python 3, GTK 3, PyGObject, Ayatana AppIndicator, and an authenticated
+OpenAI Codex installation.
+.SH AUTHOR
+Written by Łukasz Budzynowski.
+.SH REPORTING BUGS
+Report issues at the project repository:
+.br
+https://github.com/lbudzynowski/codex-usage-tray/issues
+.SH COPYRIGHT
+Copyright \(co 2026 Łukasz Budzynowski.
+Licensed under the MIT License.
