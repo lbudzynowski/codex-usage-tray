@@ -65,9 +65,12 @@ class FakeClient:
         self.read_calls = 0
         self.close_calls = 0
         self.failure: Exception | None = None
+        self.start_failure: Exception | None = None
 
     def start(self) -> None:
         self.start_calls += 1
+        if self.start_failure:
+            raise self.start_failure
 
     def read_rate_limits(self) -> tuple[RateLimitSnapshot, ...]:
         self.read_calls += 1
@@ -85,12 +88,16 @@ def synchronous_worker(callback: object) -> None:
 
 class TrayApplicationTests(unittest.TestCase):
     def make_application(
-        self, client: FakeClient, *, worker: object = synchronous_worker
+        self, *clients: FakeClient, worker: object = synchronous_worker
     ) -> tuple[TrayApplication, FakeGtk]:
         gtk = FakeGtk()
+        available_clients = iter(clients)
         return (
             TrayApplication(
-                client=client, gtk=gtk, local_timezone=UTC, worker_launcher=worker
+                client_factory=lambda: next(available_clients),
+                gtk=gtk,
+                local_timezone=UTC,
+                worker_launcher=worker,
             ),
             gtk,
         )
@@ -101,14 +108,15 @@ class TrayApplicationTests(unittest.TestCase):
         self.assertIsNotNone(codex_usage_tray)
 
     def test_start_performs_immediate_refresh_and_uses_five_minute_period(self) -> None:
-        app, gtk = self.make_application(FakeClient())
+        client = FakeClient()
+        app, gtk = self.make_application(client)
 
         app.start()
 
         self.assertEqual(gtk.timeouts[0][0], REFRESH_INTERVAL_SECONDS * 1000)
         self.assertEqual(gtk.timeouts[0][0], 300_000)
-        self.assertEqual(app._client.start_calls, 1)
-        self.assertEqual(app._client.read_calls, 1)
+        self.assertEqual(client.start_calls, 1)
+        self.assertEqual(client.read_calls, 1)
 
     def test_refresh_work_runs_off_the_gtk_thread(self) -> None:
         client = FakeClient()
@@ -162,7 +170,8 @@ class TrayApplicationTests(unittest.TestCase):
 
     def test_empty_snapshot_and_sanitized_failure_have_safe_states(self) -> None:
         client = FakeClient()
-        app, gtk = self.make_application(client)
+        replacement = FakeClient()
+        app, gtk = self.make_application(client, replacement)
         app.refresh()
         gtk.drain_idle()
         self.assertEqual(gtk.tray.statuses[-1][1], ("No usage limits are available.",))
@@ -183,6 +192,47 @@ class TrayApplicationTests(unittest.TestCase):
         self.assertEqual(gtk.removed, [99])
         self.assertEqual(client.close_calls, 1)
         self.assertEqual(gtk.quit_calls, 1)
+
+    def test_startup_failure_is_closed_and_recovers_with_a_new_client(self) -> None:
+        failed = FakeClient()
+        failed.start_failure = CodexClientError("sanitized startup failure")
+        healthy = FakeClient()
+        app, gtk = self.make_application(failed, healthy)
+
+        app.refresh()
+        app.refresh()
+        gtk.drain_idle()
+
+        self.assertEqual(failed.start_calls, 1)
+        self.assertEqual(failed.close_calls, 1)
+        self.assertEqual(failed.read_calls, 0)
+        self.assertEqual(healthy.start_calls, 1)
+        self.assertEqual(healthy.read_calls, 1)
+
+    def test_read_failure_is_closed_and_recovers_with_a_new_client(self) -> None:
+        failed = FakeClient()
+        failed.failure = CodexClientError("sanitized connection failure")
+        healthy = FakeClient()
+        app, _ = self.make_application(failed, healthy)
+
+        app.refresh()
+        app.refresh()
+
+        self.assertEqual(failed.start_calls, 1)
+        self.assertEqual(failed.read_calls, 1)
+        self.assertEqual(failed.close_calls, 1)
+        self.assertEqual(healthy.start_calls, 1)
+        self.assertEqual(healthy.read_calls, 1)
+
+    def test_successive_healthy_refreshes_reuse_one_client(self) -> None:
+        healthy = FakeClient()
+        app, _ = self.make_application(healthy)
+
+        app.refresh()
+        app.refresh()
+
+        self.assertEqual(healthy.start_calls, 1)
+        self.assertEqual(healthy.read_calls, 2)
 
 
 if __name__ == "__main__":

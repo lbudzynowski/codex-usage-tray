@@ -25,6 +25,7 @@ class RateLimitClient(Protocol):
 
 
 type WorkerLauncher = Callable[[Callable[[], None]], None]
+type ClientFactory = Callable[[], RateLimitClient]
 
 
 def launch_worker(callback: Callable[[], None]) -> None:
@@ -39,12 +40,13 @@ class TrayApplication:
     def __init__(
         self,
         *,
-        client: RateLimitClient | None = None,
+        client_factory: ClientFactory = CodexAppServerClient,
         gtk: GtkAdapter,
         local_timezone: tzinfo,
         worker_launcher: WorkerLauncher = launch_worker,
     ) -> None:
-        self._client = client or CodexAppServerClient()
+        self._client_factory = client_factory
+        self._client: RateLimitClient | None = None
         self._gtk = gtk
         self._local_timezone = local_timezone
         self._worker_launcher = worker_launcher
@@ -91,9 +93,11 @@ class TrayApplication:
             self._closed = True
             timer_id = self._timer_id
             self._timer_id = None
+            client = self._client
+            self._client = None
         if timer_id is not None:
             self._gtk.source_remove(timer_id)
-        self._worker_launcher(self._close_worker)
+        self._worker_launcher(lambda: self._close_worker(client))
 
     def _on_periodic_refresh(self) -> bool:
         self.refresh()
@@ -101,13 +105,21 @@ class TrayApplication:
             return not self._closed
 
     def _refresh_worker(self) -> None:
+        client: RateLimitClient | None = None
         try:
+            client = self._get_or_create_client()
+            if client is None:
+                return
             if not self._client_started:
-                self._client.start()
+                client.start()
                 self._client_started = True
-            snapshots = self._client.read_rate_limits()
+            snapshots = client.read_rate_limits()
             presentation = present_rate_limits(snapshots, self._local_timezone)
-        except (CodexClientError, OSError, RuntimeError, ValueError):
+        except CodexClientError:
+            if client is not None:
+                self._discard_failed_client(client)
+            self._gtk.idle_add(self._show_unavailable)
+        except (OSError, RuntimeError, ValueError):
             self._gtk.idle_add(self._show_unavailable)
         else:
             self._gtk.idle_add(lambda: self._show_presentation(presentation))
@@ -115,9 +127,33 @@ class TrayApplication:
             with self._lock:
                 self._refreshing = False
 
-    def _close_worker(self) -> None:
+    def _get_or_create_client(self) -> RateLimitClient | None:
+        """Return the healthy client or construct the next replacement off-loop."""
+
+        with self._lock:
+            if self._closed:
+                return None
+            if self._client is None:
+                self._client = self._client_factory()
+                self._client_started = False
+            return self._client
+
+    def _discard_failed_client(self, failed_client: RateLimitClient) -> None:
+        """Close and forget a broken client so the next refresh can replace it."""
+
+        with self._lock:
+            if self._client is failed_client:
+                self._client = None
+                self._client_started = False
         try:
-            self._client.close()
+            failed_client.close()
+        except (CodexClientError, OSError, RuntimeError):
+            pass
+
+    def _close_worker(self, client: RateLimitClient | None) -> None:
+        try:
+            if client is not None:
+                client.close()
         except (CodexClientError, OSError, RuntimeError):
             pass
         finally:
