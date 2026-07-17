@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Codex Usage Tray
+Comment=Show OpenAI Codex usage limits in the system tray
+Exec=/usr/bin/codex-usage-tray
+Icon=utilities-system-monitor-symbolic
+Terminal=false
+StartupNotify=false
+Categories=Utility;

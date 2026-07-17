@@ -1,0 +1,6 @@
+#!/bin/sh
+
+PATH="/usr/local/bin:/usr/bin:/bin${PATH:+:$PATH}"
+export PATH
+
+exec /usr/bin/python3 -m codex_usage_tray "$@"
