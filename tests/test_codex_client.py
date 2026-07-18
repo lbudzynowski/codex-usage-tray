@@ -13,6 +13,8 @@ from typing import cast
 from unittest.mock import patch
 
 from codex_usage_tray.codex_client import (
+    CodexAccount,
+    CodexAccountState,
     CodexAppServerClient,
     CodexClientClosedError,
     CodexConnectionClosedError,
@@ -21,8 +23,12 @@ from codex_usage_tray.codex_client import (
     CodexProcessStartError,
     CodexProtocolError,
     CodexRequestTimeoutError,
+    CodexLoginCompletion,
+    CodexLoginStart,
     RateLimitSnapshots,
     build_codex_command,
+    parse_account_result,
+    parse_login_start_result,
     parse_rate_limit_result,
 )
 from codex_usage_tray.models import RateLimitSnapshot, RateLimitWindow
@@ -312,6 +318,64 @@ class ProtocolOrderingTests(CodexClientTestCase):
             results["second"][0].primary,
             RateLimitWindow(60, 10_080, 1_784_889_359),
         )
+
+
+class AccountParsingTests(CodexClientTestCase):
+    def test_parses_signed_out_account_response(self) -> None:
+        self.assertEqual(parse_account_result({"account": None, "requiresOpenaiAuth": True}), CodexAccountState(None, True))
+
+    def test_parses_chatgpt_account_with_email_and_plan(self) -> None:
+        self.assertEqual(parse_account_result({"account": {"type": "chatgpt", "email": "user@example.test", "planType": "plus"}, "requiresOpenaiAuth": True}), CodexAccountState(CodexAccount("chatgpt", "user@example.test", "plus"), True))
+
+    def test_parses_account_with_missing_optional_email(self) -> None:
+        self.assertEqual(parse_account_result({"account": {"type": "chatgpt", "planType": "enterprise"}, "requiresOpenaiAuth": True}).account, CodexAccount("chatgpt", None, "enterprise"))
+
+    def test_rejects_malformed_account_responses(self) -> None:
+        for payload in ({}, {"account": {}, "requiresOpenaiAuth": True}, {"account": {"type": "chatgpt", "email": 3}, "requiresOpenaiAuth": True}):
+            with self.subTest(payload=payload):
+                with self.assertRaises(CodexProtocolError):
+                    parse_account_result(payload)
+
+    def test_parses_login_start_response(self) -> None:
+        self.assertEqual(parse_login_start_result({"type": "chatgpt", "loginId": "login-1", "authUrl": "https://chatgpt.com/auth"}), CodexLoginStart("login-1", "https://chatgpt.com/auth"))
+
+
+
+    def test_account_read_request_shape(self) -> None:
+        client, process, _ = self.create_client()
+        self.addCleanup(client.close)
+        self.finish_start(client, process)
+        result: list[CodexAccountState] = []
+        thread = threading.Thread(target=lambda: result.append(client.read_account()))
+        thread.start()
+        request = process.next_client_message()
+        self.assertEqual(request["method"], "account/read")
+        self.assertEqual(request["params"], {"refreshToken": False})
+        process.send_message({"id": request["id"], "result": {"account": None, "requiresOpenaiAuth": True}})
+        thread.join(timeout=0.5)
+        self.assertEqual(result, [CodexAccountState(None, True)])
+
+    def test_login_start_request_shape_and_completion_notification(self) -> None:
+        client, process, _ = self.create_client()
+        self.addCleanup(client.close)
+        self.finish_start(client, process)
+        result: list[CodexLoginStart] = []
+        thread = threading.Thread(target=lambda: result.append(client.start_chatgpt_login()))
+        thread.start()
+        request = process.next_client_message()
+        self.assertEqual(request["method"], "account/login/start")
+        self.assertEqual(request["params"], {"type": "chatgpt"})
+        process.send_message({"id": request["id"], "result": {"type": "chatgpt", "loginId": "login-1", "authUrl": "https://chatgpt.com/auth"}})
+        thread.join(timeout=0.5)
+        self.assertEqual(result, [CodexLoginStart("login-1", "https://chatgpt.com/auth")])
+        process.send_message({"method": "account/login/completed", "params": {"loginId": "login-1", "success": False, "error": "private raw error"}})
+        deadline = time.monotonic() + 0.5
+        completion = None
+        while completion is None and time.monotonic() < deadline:
+            completion = client.pop_login_completion()
+            if completion is None:
+                time.sleep(0.001)
+        self.assertEqual(completion, CodexLoginCompletion("login-1", False, True))
 
 
 class RateLimitParsingTests(unittest.TestCase):

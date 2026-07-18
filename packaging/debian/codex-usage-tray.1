@@ -1,22 +1,25 @@
-.TH CODEX-USAGE-TRAY 1 "July 2026" "codex-usage-tray 0.1.0" "User Commands"
+.TH CODEX-USAGE-TRAY 1 "July 2026" "codex-usage-tray 0.1.1" "User Commands"
 .SH NAME
 codex-usage-tray \- display OpenAI Codex usage limits in the Ubuntu system tray
 .SH SYNOPSIS
 .B codex-usage-tray
 .SH DESCRIPTION
 .B codex-usage-tray
-starts an unofficial GTK 3 AppIndicator application that reads usage limits
-from the local OpenAI Codex app-server and displays the remaining allowance
-in the Ubuntu GNOME top panel.
+starts an unofficial GTK 3 AppIndicator application that reads account state
+and usage limits from the local OpenAI Codex app-server. It displays the
+remaining allowance in the Ubuntu GNOME top panel.
 .PP
-OpenAI Codex must be installed and authenticated separately.
+OpenAI Codex must be installed separately. If Codex is signed out, the tray
+displays a sign-in-required state and offers a Sign in to Codex... action that
+starts the official Codex-managed ChatGPT browser flow. Users may also run
+.B codex login
+in a terminal.
 .SH FILES
 .TP
 .I /etc/xdg/autostart/codex-usage-tray.desktop
 System-wide autostart entry used to launch the application after login.
 .SH REQUIREMENTS
-Python 3, GTK 3, PyGObject, Ayatana AppIndicator, and an authenticated
-OpenAI Codex installation.
+Python 3, GTK 3, PyGObject, Ayatana AppIndicator, and OpenAI Codex.
 .SH AUTHOR
 Written by Łukasz Budzynowski.
 .SH REPORTING BUGS
