@@ -1,0 +1,11 @@
+codex-usage-tray (0.1.1-1~ppa1~noble1) noble; urgency=medium
+
+  * Add standards-compliant Debian source packaging for Launchpad PPA builds.
+  * Build and test the stable upstream 0.1.1 release on supported Ubuntu LTS
+    series without uploading pre-built binary packages.
+  * Include Codex account detection, browser sign-in, safe account display,
+    immediate post-login refresh, and the expanded 79-test suite from 0.1.1.
+  * Install the Python package, launcher, desktop entry, system-wide autostart
+    entry, documentation, and manual page through debhelper.
+
+ -- Łukasz Budzynowski <lbudzynowski@gmail.com>  Sat, 18 Jul 2026 17:01:32 +0200

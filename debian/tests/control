@@ -1,0 +1,3 @@
+Tests: smoke
+Depends: @, desktop-file-utils
+Restrictions: superficial

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    printf 'Usage: %s noble|resolute\n' "$0" >&2
+    exit 2
+fi
+
+series="$1"
+case "$series" in
+    noble)
+        package_version="0.1.1-1~ppa1~noble1"
+        orig_option="-sa"
+        ;;
+    resolute)
+        package_version="0.1.1-1~ppa1~resolute1"
+        orig_option="-sd"
+        ;;
+    *)
+        printf 'Unsupported Ubuntu series: %s\n' "$series" >&2
+        exit 2
+        ;;
+esac
+
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+upstream_version="0.1.1"
+upstream_tag="v${upstream_version}"
+source_name="codex-usage-tray"
+source_dir_name="${source_name}-${upstream_version}"
+output_root="$project_root/build/ppa/$series"
+source_dir="$output_root/$source_dir_name"
+orig_tar="$output_root/${source_name}_${upstream_version}.orig.tar"
+
+if ! git -C "$project_root" rev-parse --verify --quiet "${upstream_tag}^{commit}" >/dev/null; then
+    printf 'Missing upstream tag: %s\n' "$upstream_tag" >&2
+    exit 1
+fi
+
+if ! git -C "$project_root" diff --quiet "$upstream_tag" -- . ':!debian'; then
+    printf 'Upstream files differ from %s; refusing to create a mismatched orig archive.\n' "$upstream_tag" >&2
+    exit 1
+fi
+
+rm -rf -- "$output_root"
+install -d "$output_root"
+
+git -C "$project_root" archive \
+    --format=tar \
+    --prefix="${source_dir_name}/" \
+    --output="$orig_tar" \
+    "$upstream_tag"
+xz -9 --force "$orig_tar"
+
+tar -xJf "${orig_tar}.xz" -C "$output_root"
+cp -a "$project_root/debian" "$source_dir/debian"
+
+sed -i \
+    "1s/^${source_name} ([^)]*) [^;]*;/${source_name} (${package_version}) ${series};/" \
+    "$source_dir/debian/changelog"
+
+(
+    cd "$source_dir"
+    dpkg-buildpackage -S "$orig_option" -d -us -uc
+)
+
+printf 'Built unsigned %s source package in %s\n' "$series" "$output_root"

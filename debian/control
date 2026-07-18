@@ -1,0 +1,31 @@
+Source: codex-usage-tray
+Section: utils
+Priority: optional
+Maintainer: Łukasz Budzynowski <lbudzynowski@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ desktop-file-utils,
+ dh-python,
+ python3-all,
+Standards-Version: 4.7.4.1
+Rules-Requires-Root: no
+Homepage: https://github.com/lbudzynowski/codex-usage-tray
+Vcs-Browser: https://github.com/lbudzynowski/codex-usage-tray
+Vcs-Git: https://github.com/lbudzynowski/codex-usage-tray.git
+X-Python3-Version: >= 3.11
+
+Package: codex-usage-tray
+Architecture: all
+Depends:
+ gir1.2-ayatanaappindicator3-0.1,
+ gir1.2-gtk-3.0,
+ python3 (>= 3.11),
+ python3-gi,
+ ${misc:Depends},
+ ${python3:Depends},
+Description: Ubuntu tray indicator for OpenAI Codex usage limits
+ Unofficial GTK 3 AppIndicator application that reads account state and usage
+ limits from the local Codex app-server and displays the remaining allowance
+ in the Ubuntu GNOME top panel.
+ .
+ OpenAI Codex must be installed and authenticated separately.
