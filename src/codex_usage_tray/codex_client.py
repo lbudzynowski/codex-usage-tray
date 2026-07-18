@@ -62,6 +62,36 @@ class CodexClientClosedError(CodexClientError):
     """Raised when shutdown interrupts an operation."""
 
 
+@dataclass(frozen=True, slots=True)
+class CodexAccount:
+    account_type: str
+    email: str | None = None
+    plan_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CodexAccountState:
+    account: CodexAccount | None
+    requires_openai_auth: bool
+
+    @property
+    def is_signed_out(self) -> bool:
+        return self.requires_openai_auth and self.account is None
+
+
+@dataclass(frozen=True, slots=True)
+class CodexLoginStart:
+    login_id: str
+    auth_url: str
+
+
+@dataclass(frozen=True, slots=True)
+class CodexLoginCompletion:
+    login_id: str | None
+    success: bool
+    failed: bool
+
+
 class CodexShutdownError(CodexClientError):
     """Raised when forced process termination does not complete in time."""
 
@@ -202,6 +232,59 @@ def parse_rate_limit_result(payload: object) -> RateLimitSnapshots:
     return deduplicate_snapshots(snapshots)
 
 
+def parse_account_result(payload: object) -> CodexAccountState:
+    """Parse the narrow account/read result without retaining raw JSON."""
+
+    if not isinstance(payload, Mapping):
+        raise CodexProtocolError("Account response validation failed")
+    requires = payload.get("requiresOpenaiAuth")
+    if not isinstance(requires, bool):
+        raise CodexProtocolError("Account response validation failed")
+    raw_account = payload.get("account")
+    if raw_account is None:
+        return CodexAccountState(account=None, requires_openai_auth=requires)
+    if not isinstance(raw_account, Mapping):
+        raise CodexProtocolError("Account response validation failed")
+    account_type = raw_account.get("type")
+    if not isinstance(account_type, str) or not account_type:
+        raise CodexProtocolError("Account response validation failed")
+    email = raw_account.get("email")
+    if email is not None and not isinstance(email, str):
+        raise CodexProtocolError("Account response validation failed")
+    plan_type = raw_account.get("planType")
+    if plan_type is not None and not isinstance(plan_type, str):
+        raise CodexProtocolError("Account response validation failed")
+    return CodexAccountState(
+        account=CodexAccount(account_type=account_type, email=email, plan_type=plan_type),
+        requires_openai_auth=requires,
+    )
+
+
+def parse_login_start_result(payload: object) -> CodexLoginStart:
+    if not isinstance(payload, Mapping):
+        raise CodexProtocolError("Login response validation failed")
+    if payload.get("type") != "chatgpt":
+        raise CodexProtocolError("Login response validation failed")
+    login_id = payload.get("loginId")
+    auth_url = payload.get("authUrl")
+    if not isinstance(login_id, str) or not login_id:
+        raise CodexProtocolError("Login response validation failed")
+    if not isinstance(auth_url, str) or not auth_url.startswith(("http://", "https://")):
+        raise CodexProtocolError("Login response validation failed")
+    return CodexLoginStart(login_id=login_id, auth_url=auth_url)
+
+
+def parse_login_completion(payload: object) -> CodexLoginCompletion:
+    if not isinstance(payload, Mapping):
+        raise CodexProtocolError("Login completion validation failed")
+    login_id = payload.get("loginId")
+    if login_id is not None and not isinstance(login_id, str):
+        raise CodexProtocolError("Login completion validation failed")
+    success = payload.get("success")
+    if not isinstance(success, bool):
+        raise CodexProtocolError("Login completion validation failed")
+    return CodexLoginCompletion(login_id=login_id, success=success, failed=not success)
+
 def _parse_initialize_result(payload: object) -> None:
     if not isinstance(payload, Mapping):
         raise CodexProtocolError("App-server initialization response was invalid")
@@ -250,6 +333,7 @@ class CodexAppServerClient:
         self._next_request_id = 1
         self._pending: dict[int, _PendingRequest] = {}
         self._updates: deque[RateLimitSnapshots] = deque()
+        self._login_completions: deque[CodexLoginCompletion] = deque()
 
     def __enter__(self) -> CodexAppServerClient:
         self.start()
@@ -300,6 +384,36 @@ class CodexAppServerClient:
             raise CodexProcessStartError(
                 "Codex app-server process could not be started"
             ) from None
+
+    def read_account(self, timeout: float | None = None) -> CodexAccountState:
+        """Request current narrow Codex account state without refreshing tokens."""
+
+        result = self._request(
+            "account/read",
+            {"refreshToken": False},
+            parse_account_result,
+            timeout=timeout,
+        )
+        return cast(CodexAccountState, result)
+
+    def start_chatgpt_login(self, timeout: float | None = None) -> CodexLoginStart:
+        """Start Codex-managed ChatGPT browser authentication."""
+
+        result = self._request(
+            "account/login/start",
+            {"type": "chatgpt"},
+            parse_login_start_result,
+            timeout=timeout,
+        )
+        return cast(CodexLoginStart, result)
+
+    def pop_login_completion(self) -> CodexLoginCompletion | None:
+        """Return the oldest sanitized login completion notification."""
+
+        with self._state_lock:
+            if not self._login_completions:
+                return None
+            return self._login_completions.popleft()
 
     def read_rate_limits(self, timeout: float | None = None) -> RateLimitSnapshots:
         """Request the current account rate limits after initialization."""
@@ -556,6 +670,15 @@ class CodexAppServerClient:
                 return
             with self._state_lock:
                 self._updates.append(update)
+            return
+
+        if message.get("method") == "account/login/completed":
+            try:
+                completion = parse_login_completion(message.get("params"))
+            except CodexClientError:
+                return
+            with self._state_lock:
+                self._login_completions.append(completion)
 
     def _fail_connection(self, error: CodexClientError) -> None:
         with self._state_lock:

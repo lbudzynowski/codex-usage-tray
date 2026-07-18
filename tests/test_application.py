@@ -7,7 +7,7 @@ import unittest
 from datetime import UTC
 
 from codex_usage_tray.application import REFRESH_INTERVAL_SECONDS, TrayApplication
-from codex_usage_tray.codex_client import CodexClientError
+from codex_usage_tray.codex_client import CodexAccount, CodexAccountState, CodexClientError, CodexLoginCompletion, CodexLoginStart
 from codex_usage_tray.models import RateLimitSnapshot, RateLimitWindow
 
 
@@ -15,8 +15,8 @@ class FakeTray:
     def __init__(self) -> None:
         self.statuses: list[tuple[str, tuple[str, ...], str]] = []
 
-    def show_status(self, title: str, lines: tuple[str, ...], label: str) -> None:
-        self.statuses.append((title, lines, label))
+    def show_status(self, title: str, lines: tuple[str, ...], label: str, *, sign_in_available: bool = False, account_info: str | None = None) -> None:
+        self.statuses.append((title, lines, label, sign_in_available, account_info))
 
 
 class FakeGtk:
@@ -28,6 +28,9 @@ class FakeGtk:
         self.quit_calls = 0
         self.refresh_callback = None
         self.quit_callback = None
+        self.sign_in_callback = None
+        self.dialog_responses: list[bool] = []
+        self.dialog_calls = 0
 
     def idle_add(self, callback: object) -> int:
         self.idle_callbacks.append(callback)
@@ -47,10 +50,15 @@ class FakeGtk:
     def main_quit(self) -> None:
         self.quit_calls += 1
 
-    def create_tray(self, on_refresh: object, on_quit: object) -> FakeTray:
+    def create_tray(self, on_refresh: object, on_quit: object, on_sign_in: object) -> FakeTray:
         self.refresh_callback = on_refresh
         self.quit_callback = on_quit
+        self.sign_in_callback = on_sign_in
         return self.tray
+
+    def show_sign_in_dialog(self) -> bool:
+        self.dialog_calls += 1
+        return self.dialog_responses.pop(0) if self.dialog_responses else False
 
     def drain_idle(self) -> None:
         while self.idle_callbacks:
@@ -64,6 +72,10 @@ class FakeClient:
         self.start_calls = 0
         self.read_calls = 0
         self.close_calls = 0
+        self.account_calls = 0
+        self.login_calls = 0
+        self.completions: list[CodexLoginCompletion] = []
+        self.account_state = CodexAccountState(account=CodexAccount("chatgpt", "user@example.test", "plus"), requires_openai_auth=True)
         self.failure: Exception | None = None
         self.start_failure: Exception | None = None
 
@@ -72,11 +84,26 @@ class FakeClient:
         if self.start_failure:
             raise self.start_failure
 
+    def read_account(self) -> CodexAccountState:
+        self.account_calls += 1
+        if self.failure:
+            raise self.failure
+        return self.account_state
+
     def read_rate_limits(self) -> tuple[RateLimitSnapshot, ...]:
         self.read_calls += 1
+        if getattr(self, "read_failure", None):
+            raise self.read_failure
         if self.failure:
             raise self.failure
         return self.snapshots
+
+    def start_chatgpt_login(self) -> CodexLoginStart:
+        self.login_calls += 1
+        return CodexLoginStart("login-1", "https://chatgpt.com/auth")
+
+    def pop_login_completion(self) -> CodexLoginCompletion | None:
+        return self.completions.pop(0) if self.completions else None
 
     def close(self) -> None:
         self.close_calls += 1
@@ -163,8 +190,9 @@ class TrayApplicationTests(unittest.TestCase):
         app, gtk = self.make_application(FakeClient(snapshots))
         app.refresh()
         gtk.drain_idle()
-        title, lines, label = gtk.tray.statuses[-1]
+        title, lines, label, _sign_in, account_info = gtk.tray.statuses[-1]
         self.assertEqual(title, "codex")
+        self.assertEqual(account_info, "Account: user@example.test — Plus")
         self.assertEqual(lines, ("7 days: 90% remaining", "5 hours: 80% remaining"))
         self.assertEqual(label, "80%")
 
@@ -189,7 +217,7 @@ class TrayApplicationTests(unittest.TestCase):
         self.assertEqual(client.read_calls, initial_reads + 1)
         gtk.quit_callback()
         gtk.drain_idle()
-        self.assertEqual(gtk.removed, [99])
+        self.assertEqual(gtk.removed, [99, 99])
         self.assertEqual(client.close_calls, 1)
         self.assertEqual(gtk.quit_calls, 1)
 
@@ -211,7 +239,7 @@ class TrayApplicationTests(unittest.TestCase):
 
     def test_read_failure_is_closed_and_recovers_with_a_new_client(self) -> None:
         failed = FakeClient()
-        failed.failure = CodexClientError("sanitized connection failure")
+        failed.read_failure = CodexClientError("sanitized connection failure")
         healthy = FakeClient()
         app, _ = self.make_application(failed, healthy)
 
@@ -233,6 +261,62 @@ class TrayApplicationTests(unittest.TestCase):
 
         self.assertEqual(healthy.start_calls, 1)
         self.assertEqual(healthy.read_calls, 2)
+
+    def test_account_check_occurs_before_rate_limit_read(self) -> None:
+        client = FakeClient()
+        app, _ = self.make_application(client)
+        app.refresh()
+        self.assertEqual(client.account_calls, 1)
+        self.assertEqual(client.read_calls, 1)
+
+    def test_signed_out_state_and_prompt_once_not_now_keeps_running(self) -> None:
+        client = FakeClient()
+        client.account_state = CodexAccountState(account=None, requires_openai_auth=True)
+        app, gtk = self.make_application(client)
+        app.refresh(); gtk.drain_idle()
+        app.refresh(); gtk.drain_idle()
+        self.assertEqual(gtk.tray.statuses[-1][1], ("Codex is not signed in.",))
+        self.assertEqual(gtk.tray.statuses[-1][3], True)
+        self.assertEqual(gtk.dialog_calls, 1)
+        self.assertEqual(gtk.quit_calls, 0)
+        self.assertEqual(client.read_calls, 0)
+
+    def test_sign_in_uses_injected_opener_and_prevents_duplicates(self) -> None:
+        client = FakeClient()
+        opened: list[str] = []
+        queued: list[object] = []
+        app, _ = self.make_application(client, worker=queued.append)
+        app._url_opener = lambda url: opened.append(url) or True
+        app.sign_in(); app.sign_in()
+        self.assertEqual(len(queued), 1)
+        queued.pop(0)()
+        self.assertEqual(opened, ["https://chatgpt.com/auth"])
+        self.assertEqual(client.login_calls, 1)
+
+    def test_successful_login_completion_refreshes_immediately(self) -> None:
+        client = FakeClient()
+        app, gtk = self.make_application(client)
+        app._url_opener = lambda _url: True
+        app.sign_in(); gtk.drain_idle()
+        self.assertEqual(client.login_calls, 1)
+        client.completions.append(CodexLoginCompletion("login-1", True, False))
+        app._on_login_poll(); gtk.drain_idle()
+        self.assertGreaterEqual(client.account_calls, 1)
+        self.assertGreaterEqual(client.read_calls, 1)
+
+    def test_failed_login_and_browser_failure_are_sanitized(self) -> None:
+        client = FakeClient()
+        app, gtk = self.make_application(client)
+        app._url_opener = lambda _url: False
+        app.sign_in(); gtk.drain_idle()
+        self.assertEqual(gtk.tray.statuses[-1][1], ("Could not open the browser. Run `codex login` in a terminal.",))
+        self.assertNotIn("chatgpt.com", gtk.tray.statuses[-1][1][0])
+
+        client.completions.append(CodexLoginCompletion("login-1", False, True))
+        app._pending_login_id = "login-1"
+        app._login_pending = True
+        app._on_login_poll(); gtk.drain_idle()
+        self.assertEqual(gtk.tray.statuses[-1][1], ("Codex sign-in failed.",))
 
 
 if __name__ == "__main__":

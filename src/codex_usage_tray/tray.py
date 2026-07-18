@@ -13,7 +13,15 @@ from typing import Protocol
 class TrayView(Protocol):
     """Small GTK-facing surface used by the application coordinator."""
 
-    def show_status(self, title: str, lines: tuple[str, ...], label: str) -> None: ...
+    def show_status(
+        self,
+        title: str,
+        lines: tuple[str, ...],
+        label: str,
+        *,
+        sign_in_available: bool = False,
+        account_info: str | None = None,
+    ) -> None: ...
 
 
 class GtkAdapter(Protocol):
@@ -30,8 +38,13 @@ class GtkAdapter(Protocol):
     def main_quit(self) -> None: ...
 
     def create_tray(
-        self, on_refresh: Callable[[], None], on_quit: Callable[[], None]
+        self,
+        on_refresh: Callable[[], None],
+        on_quit: Callable[[], None],
+        on_sign_in: Callable[[], None],
     ) -> TrayView: ...
+
+    def show_sign_in_dialog(self) -> bool: ...
 
 
 def load_gtk_adapter() -> GtkAdapter:
@@ -55,7 +68,7 @@ def load_gtk_adapter() -> GtkAdapter:
 
     class _GtkTray:
         def __init__(
-            self, on_refresh: Callable[[], None], on_quit: Callable[[], None]
+            self, on_refresh: Callable[[], None], on_quit: Callable[[], None], on_sign_in: Callable[[], None]
         ) -> None:
             self._indicator = AppIndicator.Indicator.new(
                 "codex-usage-tray", "utilities-system-monitor-symbolic",
@@ -64,6 +77,8 @@ def load_gtk_adapter() -> GtkAdapter:
             self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
             self._menu = Gtk.Menu()
             self._status_items: list[object] = []
+            self._sign_in_item = Gtk.MenuItem(label="Sign in to Codex…")
+            self._sign_in_item.connect("activate", lambda _item: on_sign_in())
             self._refresh_item = Gtk.MenuItem(label="Refresh")
             self._refresh_item.connect("activate", lambda _item: on_refresh())
             self._quit_item = Gtk.MenuItem(label="Quit")
@@ -71,12 +86,18 @@ def load_gtk_adapter() -> GtkAdapter:
             self._indicator.set_menu(self._menu)
 
         def show_status(
-            self, title: str, lines: tuple[str, ...], label: str
+            self,
+            title: str,
+            lines: tuple[str, ...],
+            label: str,
+            *,
+            sign_in_available: bool = False,
+            account_info: str | None = None,
         ) -> None:
             for item in self._menu.get_children():
                 self._menu.remove(item)
             self._status_items = []
-            for text in (title, *lines):
+            for text in (title, *((account_info,) if account_info else ()), *lines):
                 item = Gtk.MenuItem(label=text)
                 item.set_sensitive(False)
                 self._menu.append(item)
@@ -84,6 +105,9 @@ def load_gtk_adapter() -> GtkAdapter:
             separator = Gtk.SeparatorMenuItem()
             self._menu.append(separator)
             self._status_items.append(separator)
+            if sign_in_available:
+                self._sign_in_item.set_sensitive(True)
+                self._menu.append(self._sign_in_item)
             self._menu.append(self._refresh_item)
             self._menu.append(self._quit_item)
             self._indicator.set_label(label, "")
@@ -105,9 +129,25 @@ def load_gtk_adapter() -> GtkAdapter:
         def main_quit(self) -> None:
             Gtk.main_quit()
 
+        def show_sign_in_dialog(self) -> bool:
+            dialog = Gtk.MessageDialog(
+                None,
+                0,
+                Gtk.MessageType.INFO,
+                Gtk.ButtonsType.NONE,
+                "Codex Usage Tray needs Codex to be signed in before it can read usage limits.",
+            )
+            dialog.set_title("Codex sign-in required")
+            dialog.add_button("Not now", Gtk.ResponseType.CANCEL)
+            dialog.add_button("Sign in", Gtk.ResponseType.OK)
+            try:
+                return dialog.run() == Gtk.ResponseType.OK
+            finally:
+                dialog.destroy()
+
         def create_tray(
-            self, on_refresh: Callable[[], None], on_quit: Callable[[], None]
+            self, on_refresh: Callable[[], None], on_quit: Callable[[], None], on_sign_in: Callable[[], None]
         ) -> TrayView:
-            return _GtkTray(on_refresh, on_quit)
+            return _GtkTray(on_refresh, on_quit, on_sign_in)
 
     return _Adapter()

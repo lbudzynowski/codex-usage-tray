@@ -1,3 +1,10 @@
+codex-usage-tray (0.1.1) unstable; urgency=high
+
+  * Add explicit Codex account detection and ChatGPT sign-in tray flow.
+  * Keep credential storage delegated to Codex while improving signed-out UX.
+
+ -- Łukasz Budzynowski <lbudzynowski@gmail.com>  Sat, 18 Jul 2026 00:00:00 +0000
+
 codex-usage-tray (0.1.0) unstable; urgency=medium
 
   * Initial release.
