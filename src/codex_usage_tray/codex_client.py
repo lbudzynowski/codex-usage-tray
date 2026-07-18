@@ -19,8 +19,8 @@ from .models import (
     deduplicate_snapshots,
 )
 
-type RateLimitSnapshots = tuple[RateLimitSnapshot, ...]
-type Message = dict[str, object]
+RateLimitSnapshots = tuple[RateLimitSnapshot, ...]
+Message = dict[str, object]
 
 _T = TypeVar("_T")
 _MISSING = object()
@@ -111,7 +111,7 @@ class ProcessLike(Protocol):
     def kill(self) -> None: ...
 
 
-type ProcessFactory = Callable[[tuple[str, ...]], ProcessLike]
+ProcessFactory = Callable[[tuple[str, ...]], ProcessLike]
 
 
 class _ClientState(Enum):

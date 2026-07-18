@@ -11,7 +11,7 @@ message instead of a generic unavailable state.
 
 - Ubuntu GNOME with AppIndicator support
 - Python 3.11 or newer
-- OpenAI Codex installed separately
+- OpenAI Codex installed and authenticated separately
 
 Codex itself is not bundled in this package. The package never contains the
 developer's credentials, account tokens, browser cookies, or any bundled
@@ -33,8 +33,10 @@ You may alternatively run this in a terminal:
 
     codex login
 
-After successful authentication, Codex Usage Tray automatically reads the
-account again and refreshes usage limits without requiring a restart.
+When Codex is signed in, the menu can show the account email address and plan
+reported by Codex. After successful authentication, Codex Usage Tray reads the
+account again and refreshes usage limits immediately, without requiring a
+restart.
 
 ## Installation
 
@@ -51,6 +53,51 @@ Start the application immediately with:
     codex-usage-tray
 
 The application is also configured to start automatically after the next login.
+The package installs a system-wide GNOME autostart entry at
+`/etc/xdg/autostart/codex-usage-tray.desktop`; each desktop user still uses
+their own Codex authentication.
+
+## Tray menu
+
+- **Sign in to Codex…** is available when Codex reports that no account is
+  signed in. It starts the Codex-managed browser authentication flow.
+- **Refresh** checks account state and usage limits immediately. The application
+  also refreshes automatically every five minutes.
+- **Quit** stops the current tray process. The application starts again at the
+  next desktop login while the autostart entry remains enabled.
+
+## Data source and privacy
+
+The application communicates only with a local `codex app-server` subprocess.
+It requests the current account state and rate limits through that supported
+local protocol; it does not scrape ChatGPT pages.
+
+Codex Usage Tray does not directly read authentication tokens, browser cookies,
+browser data, or Codex authentication files such as `~/.codex/auth.json`.
+Authentication and any network communication required for it remain under
+Codex's control. The account email and plan returned by Codex are held only in
+memory and shown locally in the tray menu; this application does not store or
+log them.
+
+## Diagnostics
+
+If the tray shows `Usage unavailable.`, first verify that Codex is available to
+the desktop session and complete authentication if needed:
+
+    codex --version
+    codex login
+
+You can then restart the tray from the desktop launcher or run:
+
+    codex-usage-tray
+
+These checks do not require opening or copying token, cookie, browser, or Codex
+authentication files. Bug reports should contain the package version, Ubuntu
+version, desktop environment, and the displayed status message, but no
+credentials or authentication-file contents.
+
+Codex Usage Tray is an unofficial community application and is not affiliated
+with or endorsed by OpenAI.
 
 ## Uninstallation
 

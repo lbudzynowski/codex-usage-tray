@@ -36,9 +36,9 @@ class RateLimitClient(Protocol):
     def close(self) -> None: ...
 
 
-type WorkerLauncher = Callable[[Callable[[], None]], None]
-type ClientFactory = Callable[[], RateLimitClient]
-type UrlOpener = Callable[[str], bool]
+WorkerLauncher = Callable[[Callable[[], None]], None]
+ClientFactory = Callable[[], RateLimitClient]
+UrlOpener = Callable[[str], bool]
 
 
 def launch_worker(callback: Callable[[], None]) -> None:

@@ -1,9 +1,15 @@
-codex-usage-tray (0.1.1) unstable; urgency=high
+codex-usage-tray (0.1.1) unstable; urgency=medium
 
-  * Add explicit Codex account detection and ChatGPT sign-in tray flow.
-  * Keep credential storage delegated to Codex while improving signed-out UX.
+  * Detect signed-in and signed-out Codex account states before reading limits.
+  * Add a Codex-managed ChatGPT browser sign-in action and prompt.
+  * Show sanitized account email and plan details in the local tray menu.
+  * Refresh account state and usage limits immediately after successful login.
+  * Keep credential storage delegated to Codex and document the local data flow.
+  * Update desktop metadata, documentation, and packaging for version 0.1.1.
+  * Preserve the declared Python 3.11 compatibility for type aliases.
+  * Expand account, login, application, and client test coverage.
 
- -- Łukasz Budzynowski <lbudzynowski@gmail.com>  Sat, 18 Jul 2026 00:00:00 +0000
+ -- Łukasz Budzynowski <lbudzynowski@gmail.com>  Sat, 18 Jul 2026 11:06:48 +0200
 
 codex-usage-tray (0.1.0) unstable; urgency=medium
 

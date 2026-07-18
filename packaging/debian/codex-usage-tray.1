@@ -14,12 +14,58 @@ displays a sign-in-required state and offers a Sign in to Codex... action that
 starts the official Codex-managed ChatGPT browser flow. Users may also run
 .B codex login
 in a terminal.
+.PP
+When Codex is signed in, the menu can display the account email address and
+plan reported by Codex. A successful browser sign-in is detected automatically,
+after which account state and usage limits are refreshed immediately.
+.SH MENU
+.TP
+.B Sign in to Codex...
+Available when Codex reports that no account is signed in. Starts the
+Codex-managed browser authentication flow.
+.TP
+.B Refresh
+Checks account state and usage limits immediately. An automatic refresh also
+runs every five minutes.
+.TP
+.B Quit
+Stops the current tray process. The system autostart entry starts a new process
+at the next desktop login while that entry remains enabled.
+.SH DATA SOURCE AND PRIVACY
+The application communicates with a local
+.B codex app-server
+subprocess to request account state and usage limits. It does not scrape
+ChatGPT pages.
+.PP
+Codex Usage Tray does not directly read authentication tokens, browser cookies,
+browser data, or Codex authentication files such as
+.IR ~/.codex/auth.json .
+Codex manages authentication and any network communication it requires. The
+account email and plan returned by Codex are held in memory and displayed
+locally; this application does not store or log them.
+.SH DIAGNOSTICS
+If the tray reports Usage unavailable, verify that Codex is available to the
+desktop session with
+.B codex --version
+and authenticate with
+.B codex login
+if needed. Restart the application from the desktop launcher or run
+.B codex-usage-tray
+in a terminal.
+.PP
+Do not include credentials or authentication-file contents in bug reports.
+Useful details are the package version, Ubuntu version, desktop environment,
+and the displayed status message.
 .SH FILES
 .TP
 .I /etc/xdg/autostart/codex-usage-tray.desktop
 System-wide autostart entry used to launch the application after login.
 .SH REQUIREMENTS
-Python 3, GTK 3, PyGObject, Ayatana AppIndicator, and OpenAI Codex.
+Python 3.11 or newer, GTK 3, PyGObject, Ayatana AppIndicator, and a separately
+installed and authenticated OpenAI Codex.
+.SH DISCLAIMER
+Codex Usage Tray is an unofficial community application and is not affiliated
+with or endorsed by OpenAI.
 .SH AUTHOR
 Written by Łukasz Budzynowski.
 .SH REPORTING BUGS
