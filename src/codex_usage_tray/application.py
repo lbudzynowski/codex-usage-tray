@@ -120,6 +120,7 @@ class TrayApplication:
         self._pairing_view: PairingView | None = None
         self._pairing_polling = False
         self._lock = Lock()
+        self._inhibitor_sync_lock = Lock()
         if remote_control is not None and hasattr(self._tray, "configure_remote_control"):
             self._tray.configure_remote_control(
                 self.start_remote_control,
@@ -413,14 +414,21 @@ class TrayApplication:
         inhibitor = self._sleep_inhibitor
         if inhibitor is None:
             return
-        with self._lock:
-            required = self._prevent_sleep and self._remote_state.is_active and not self._closed
-        try:
-            inhibitor.set_required(required)
-        except InhibitorError:
-            self._inhibitor_error = True
-        else:
-            self._inhibitor_error = False
+        with self._inhibitor_sync_lock:
+            with self._lock:
+                required = (
+                    self._prevent_sleep
+                    and self._remote_state.is_active
+                    and not self._closed
+                )
+            try:
+                inhibitor.set_required(required)
+            except InhibitorError:
+                inhibitor_error = True
+            else:
+                inhibitor_error = False
+            with self._lock:
+                self._inhibitor_error = inhibitor_error
         self._gtk.idle_add(self._show_remote_control)
 
     def _ensure_started_client(self) -> RateLimitClient | None:
@@ -456,7 +464,8 @@ class TrayApplication:
             pass
         try:
             if self._sleep_inhibitor is not None:
-                self._sleep_inhibitor.close()
+                with self._inhibitor_sync_lock:
+                    self._sleep_inhibitor.close()
         except (InhibitorError, OSError, RuntimeError):
             pass
         self._gtk.idle_add(self._gtk.main_quit)
@@ -472,6 +481,7 @@ class TrayApplication:
         with self._lock:
             state = self._remote_state
             prevent_sleep = self._prevent_sleep
+            inhibitor_error = self._inhibitor_error
         inhibitor_active = bool(
             self._sleep_inhibitor is not None and self._sleep_inhibitor.is_active
         )
@@ -493,7 +503,7 @@ class TrayApplication:
             pair_enabled=state.phase is RemoteControlPhase.CONNECTED,
             prevent_sleep=prevent_sleep,
             inhibitor_active=inhibitor_active,
-            inhibitor_error=self._inhibitor_error,
+            inhibitor_error=inhibitor_error,
         )
         return False
 

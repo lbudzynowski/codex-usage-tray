@@ -10,6 +10,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from collections.abc import Callable, Sequence
+from threading import RLock
 from typing import Protocol
 
 
@@ -51,57 +52,71 @@ class SleepInhibitor:
         self._process_factory = process_factory
         self._release_timeout = release_timeout
         self._process: InhibitorProcess | None = None
+        self._closed = False
+        self._lock = RLock()
 
     @property
     def is_active(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+        with self._lock:
+            return self._process is not None and self._process.poll() is None
 
     def set_required(self, required: bool) -> None:
-        if required:
-            self.acquire()
-        else:
-            self.release()
+        with self._lock:
+            if required:
+                self.acquire()
+            else:
+                self.release()
 
     def acquire(self) -> None:
-        if self.is_active:
-            return
-        self._process = None
-        executable = shutil.which("systemd-inhibit")
-        if executable is None:
-            raise InhibitorError("systemd-inhibit is unavailable")
-        command = (
-            executable,
-            "--what=sleep:idle",
-            "--who=Codex Usage Tray",
-            "--why=Codex Remote Control is active",
-            "--mode=block",
-            "sleep",
-            "infinity",
-        )
-        try:
-            process = self._process_factory(command)
-        except InhibitorError:
-            raise
-        except Exception:
-            raise InhibitorError("Sleep inhibitor could not be started") from None
-        if process.poll() is not None:
-            raise InhibitorError("Sleep inhibitor exited during startup")
-        self._process = process
+        with self._lock:
+            if self._closed:
+                raise InhibitorError("Sleep inhibitor is closed")
+            if self.is_active:
+                return
+            self._process = None
+            executable = shutil.which("systemd-inhibit")
+            if executable is None:
+                raise InhibitorError("systemd-inhibit is unavailable")
+            command = (
+                executable,
+                "--what=sleep:idle",
+                "--who=Codex Usage Tray",
+                "--why=Codex Remote Control is active",
+                "--mode=block",
+                "sleep",
+                "infinity",
+            )
+            try:
+                process = self._process_factory(command)
+            except InhibitorError:
+                raise
+            except Exception:
+                raise InhibitorError("Sleep inhibitor could not be started") from None
+            if process.poll() is not None:
+                raise InhibitorError("Sleep inhibitor exited during startup")
+            self._process = process
 
     def release(self) -> None:
-        process = self._process
-        self._process = None
-        if process is None or process.poll() is not None:
-            return
-        process.terminate()
-        try:
-            process.wait(timeout=self._release_timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        with self._lock:
+            process = self._process
+            if process is None:
+                return
+            if process.poll() is not None:
+                self._process = None
+                return
+            process.terminate()
             try:
                 process.wait(timeout=self._release_timeout)
             except subprocess.TimeoutExpired:
-                raise InhibitorError("Sleep inhibitor did not stop") from None
+                process.kill()
+                try:
+                    process.wait(timeout=self._release_timeout)
+                except subprocess.TimeoutExpired:
+                    # Retain ownership so a later release can try again.
+                    raise InhibitorError("Sleep inhibitor did not stop") from None
+            self._process = None
 
     def close(self) -> None:
-        self.release()
+        with self._lock:
+            self._closed = True
+            self.release()
