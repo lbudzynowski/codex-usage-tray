@@ -1,6 +1,6 @@
 """Core data types and formatting helpers for Codex Usage Tray."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.1"
 
 from .formatting import (
     format_reset_timestamp,

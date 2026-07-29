@@ -12,11 +12,20 @@ message instead of a generic unavailable state.
 - Ubuntu GNOME with AppIndicator support
 - Python 3.11 or newer
 - OpenAI Codex installed and authenticated separately
+- Codex CLI 0.146.0 or a compatible version exposing `remote-control` and
+  `app-server proxy`
+- `systemd-inhibit` (provided by systemd) for sleep protection, which is
+  enabled by default
 
 Codex itself is not bundled in this package. The package never contains the
 developer's credentials, account tokens, browser cookies, or any bundled
 credential material. Each operating-system user uses their own local Codex
 authentication managed by Codex.
+
+Both usage limits and Remote Control use the same Codex executable. A valid
+executable named by `CODEX_EXECUTABLE` takes priority, followed by
+`$HOME/.local/bin/codex`, then the first `codex` found on the normal `PATH`.
+An invalid explicit override is rejected without exposing its path in the UI.
 
 ## Authentication
 
@@ -42,11 +51,11 @@ restart.
 
 Download the latest `.deb` package from GitHub Releases and install it with:
 
-    sudo apt install ./codex-usage-tray_0.1.1_all.deb
+    sudo apt install ./codex-usage-tray_0.2.1_all.deb
 
 To upgrade from a downloaded package, run the same command with the new file:
 
-    sudo apt install ./codex-usage-tray_0.1.1_all.deb
+    sudo apt install ./codex-usage-tray_0.2.1_all.deb
 
 Start the application immediately with:
 
@@ -63,14 +72,65 @@ their own Codex authentication.
   signed in. It starts the Codex-managed browser authentication flow.
 - **Refresh** checks account state and usage limits immediately. The application
   also refreshes automatically every five minutes.
+- The **Remote Control** section shows stopped, starting, connected,
+  disconnected, error, or unavailable state and includes the host name when
+  Codex reports one.
+- **Start Remote Control** and **Stop Remote Control** call the official Codex
+  CLI daemon commands. The actions are enabled only when appropriate.
+- **Pair a device…** requests an official short-lived manual pairing code and
+  keeps it only in memory. The dialog supports copying, expiry countdown,
+  successful-claim detection, and generating a replacement code.
+- **Prevent sleep while Remote Control is active** is enabled by default and
+  blocks automatic suspend and logind idle sleep only while Remote Control is
+  connected. It can be disabled for the current tray session.
 - **Quit** stops the current tray process. The application starts again at the
   next desktop login while the autostart entry remains enabled.
 
+## Codex Remote Control
+
+Remote Control is an experimental Codex feature and its command and JSON
+contracts may change between CLI versions. This application was verified with
+Codex CLI 0.146.0. Older or incompatible CLIs are shown as **Remote Control:
+Unavailable** rather than being treated as stopped.
+
+The tray passively reads the running daemon's state through the official local
+`codex app-server proxy` control channel. It does not start Remote Control merely
+to discover its status. Starting, stopping, and pairing occur only after the
+corresponding user action.
+
+To pair a phone, first wait for **Remote Control: Connected**, choose **Pair a
+device…**, then enter the displayed code in the ChatGPT mobile app. Pairing
+codes, opaque pairing payloads, and environment identifiers are not logged or
+persisted by Codex Usage Tray.
+
+Codex currently returns an opaque `pairingCode` in addition to the documented
+manual code, but the public protocol does not define that value as a QR scanner
+payload. Codex Usage Tray therefore does not generate a QR code. In particular,
+it does not invent a QR format from `manualPairingCode`; QR support can be added
+when OpenAI publishes or otherwise confirms the scanner contract.
+
+Sleep protection is enabled by default and runs a local `systemd-inhibit`
+process scoped to `sleep:idle`. It is acquired only while Remote Control is
+connected and the checkbox is enabled, and is released after disconnection,
+stop, disabling the checkbox, or quitting the tray. The preference is not
+persisted between tray sessions. The screen may still dim, turn off, or lock.
+
+The tray does not modify GNOME or logind laptop-lid configuration. Lid-close
+behavior remains controlled by the operating system, and an inhibitor may be
+respected or ignored depending on settings such as `LidSwitchIgnoreInhibited`.
+Do not assume that closing the lid will preserve Remote Control. Never place
+the laptop in a bag while it remains powered and awake.
+
+Codex Usage Tray does not open or listen on a network port. Remote connectivity
+and authentication remain owned by the separately installed Codex daemon; the
+tray only uses local CLI and local control-socket interfaces.
+
 ## Data source and privacy
 
-The application communicates only with a local `codex app-server` subprocess.
-It requests the current account state and rate limits through that supported
-local protocol; it does not scrape ChatGPT pages.
+The usage-limit feature communicates only with a local `codex app-server`
+subprocess. It requests the current account state and rate limits through that
+supported local protocol; it does not scrape ChatGPT pages. Remote Control uses
+the local Codex CLI and its local daemon control socket as described above.
 
 Codex Usage Tray does not directly read authentication tokens, browser cookies,
 browser data, or Codex authentication files such as `~/.codex/auth.json`.
@@ -86,6 +146,22 @@ the desktop session and complete authentication if needed:
 
     codex --version
     codex login
+
+For Remote Control failures, also inspect the installed command surface without
+starting or stopping the daemon:
+
+    codex remote-control --help
+    codex remote-control start --help
+    codex remote-control pair --help
+    codex app-server proxy --help
+
+An **Unavailable** state usually means the installed CLI or its managed daemon
+does not expose the required experimental methods. **Disconnected** means
+Remote Control is enabled but has not established its relay connection; check
+normal network and proxy access. **Error** covers timeouts, malformed JSON,
+control-socket failures, and non-zero command exits. The tray intentionally
+does not include raw pairing output or potentially sensitive daemon output in
+diagnostics.
 
 You can then restart the tray from the desktop launcher or run:
 

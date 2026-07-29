@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
@@ -13,6 +12,8 @@ from math import isfinite
 from threading import Event, Lock, RLock, Thread, current_thread
 from typing import IO, Protocol, TypeVar, cast
 
+from . import codex_executable
+from .codex_executable import CodexExecutableResolutionError
 from .models import (
     RateLimitSnapshot,
     RateLimitValidationError,
@@ -31,7 +32,7 @@ class CodexClientError(RuntimeError):
 
 
 class CodexExecutableNotFoundError(CodexClientError):
-    """Raised when the Codex executable cannot be located through PATH."""
+    """Raised when a usable Codex executable cannot be located."""
 
 
 class CodexProcessStartError(CodexClientError):
@@ -141,12 +142,18 @@ def _validate_timeout(value: float, field_name: str) -> float:
     return timeout
 
 
-def build_codex_command() -> tuple[str, ...]:
-    """Build the app-server command using only PATH-based executable lookup."""
+def build_codex_command(
+    *, executable_resolver: Callable[[], str] | None = None
+) -> tuple[str, ...]:
+    """Build the app-server command with the shared executable resolver."""
 
-    executable = shutil.which("codex")
-    if executable is None:
-        raise CodexExecutableNotFoundError("Codex executable was not found in PATH")
+    resolver = executable_resolver or codex_executable.resolve_codex_executable
+    try:
+        executable = resolver()
+    except (CodexExecutableResolutionError, OSError, ValueError):
+        raise CodexExecutableNotFoundError(
+            "Codex executable was not found in PATH"
+        ) from None
     return (executable, "-c", "analytics.enabled=false", "app-server")
 
 

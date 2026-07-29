@@ -21,6 +21,7 @@ Depends:
  gir1.2-gtk-3.0,
  python3 (>= 3.11),
  python3-gi,
+ systemd,
  ${misc:Depends},
  ${python3:Depends},
 Description: Ubuntu tray indicator for OpenAI Codex usage limits

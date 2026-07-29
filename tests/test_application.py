@@ -9,14 +9,57 @@ from datetime import UTC
 from codex_usage_tray.application import REFRESH_INTERVAL_SECONDS, TrayApplication
 from codex_usage_tray.codex_client import CodexAccount, CodexAccountState, CodexClientError, CodexLoginCompletion, CodexLoginStart
 from codex_usage_tray.models import RateLimitSnapshot, RateLimitWindow
+from codex_usage_tray.pairing import PairingArtifact
+from codex_usage_tray.remote_control import (
+    RemoteControlPhase,
+    RemoteControlState,
+    RemoteControlUnavailableError,
+)
+from codex_usage_tray.sleep_inhibitor import InhibitorError
 
 
 class FakeTray:
     def __init__(self) -> None:
         self.statuses: list[tuple[str, tuple[str, ...], str]] = []
+        self.remote_statuses: list[tuple[object, ...]] = []
+        self.remote_callbacks: tuple[object, ...] | None = None
 
     def show_status(self, title: str, lines: tuple[str, ...], label: str, *, sign_in_available: bool = False, account_info: str | None = None) -> None:
         self.statuses.append((title, lines, label, sign_in_available, account_info))
+
+    def configure_remote_control(self, *callbacks: object) -> None:
+        self.remote_callbacks = callbacks
+
+    def show_remote_control(self, status: str, **values: object) -> None:
+        self.remote_statuses.append((status, values))
+
+
+class FakePairingView:
+    def __init__(self) -> None:
+        self.remaining: list[int | None] = []
+        self.copied = 0
+        self.claimed = 0
+        self.expired = 0
+        self.errors = 0
+        self.closed = 0
+
+    def show_remaining(self, seconds: int | None) -> None:
+        self.remaining.append(seconds)
+
+    def show_copied(self) -> None:
+        self.copied += 1
+
+    def show_claimed(self) -> None:
+        self.claimed += 1
+
+    def show_expired(self) -> None:
+        self.expired += 1
+
+    def show_error(self) -> None:
+        self.errors += 1
+
+    def close(self) -> None:
+        self.closed += 1
 
 
 class FakeGtk:
@@ -31,6 +74,10 @@ class FakeGtk:
         self.sign_in_callback = None
         self.dialog_responses: list[bool] = []
         self.dialog_calls = 0
+        self.pairing_views: list[FakePairingView] = []
+        self.pairing_dialogs: list[tuple[str, object, object, object]] = []
+        self.pairing_errors: list[str] = []
+        self.clipboard: list[str] = []
 
     def idle_add(self, callback: object) -> int:
         self.idle_callbacks.append(callback)
@@ -59,6 +106,18 @@ class FakeGtk:
     def show_sign_in_dialog(self) -> bool:
         self.dialog_calls += 1
         return self.dialog_responses.pop(0) if self.dialog_responses else False
+
+    def show_pairing_dialog(self, manual_code: str, *, on_copy: object, on_new: object, on_closed: object) -> FakePairingView:
+        view = FakePairingView()
+        self.pairing_views.append(view)
+        self.pairing_dialogs.append((manual_code, on_copy, on_new, on_closed))
+        return view
+
+    def show_pairing_error(self, message: str) -> None:
+        self.pairing_errors.append(message)
+
+    def copy_to_clipboard(self, text: str) -> None:
+        self.clipboard.append(text)
 
     def drain_idle(self) -> None:
         while self.idle_callbacks:
@@ -107,6 +166,67 @@ class FakeClient:
 
     def close(self) -> None:
         self.close_calls += 1
+        if getattr(self, "close_failure", None):
+            raise self.close_failure
+
+
+class FakeRemoteControl:
+    def __init__(self) -> None:
+        self.state = RemoteControlState(RemoteControlPhase.STOPPED)
+        self.start_state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        self.stop_state = RemoteControlState(RemoteControlPhase.STOPPED)
+        self.artifact = PairingArtifact(
+            "TEST-CODE-ONLY", "test-pairing-payload-not-valid", 9_999_999_999
+        )
+        self.claimed = False
+        self.calls: list[str] = []
+        self.status_failure: Exception | None = None
+
+    def read_status(self) -> RemoteControlState:
+        self.calls.append("status")
+        if self.status_failure is not None:
+            raise self.status_failure
+        return self.state
+
+    def start(self) -> RemoteControlState:
+        self.calls.append("start")
+        return self.start_state
+
+    def stop(self) -> RemoteControlState:
+        self.calls.append("stop")
+        return self.stop_state
+
+    def pair(self) -> PairingArtifact:
+        self.calls.append("pair")
+        return self.artifact
+
+    def pairing_claimed(self, _artifact: PairingArtifact) -> bool:
+        self.calls.append("pair-status")
+        return self.claimed
+
+
+class FakeInhibitor:
+    def __init__(self) -> None:
+        self._is_active = False
+        self.is_active_reads = 0
+        self.required: list[bool] = []
+        self.close_calls = 0
+        self.failure: Exception | None = None
+
+    @property
+    def is_active(self) -> bool:
+        self.is_active_reads += 1
+        return self._is_active
+
+    def set_required(self, required: bool) -> None:
+        self.required.append(required)
+        if self.failure is not None:
+            raise self.failure
+        self._is_active = required
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self._is_active = False
 
 
 def synchronous_worker(callback: object) -> None:
@@ -115,7 +235,11 @@ def synchronous_worker(callback: object) -> None:
 
 class TrayApplicationTests(unittest.TestCase):
     def make_application(
-        self, *clients: FakeClient, worker: object = synchronous_worker
+        self,
+        *clients: FakeClient,
+        worker: object = synchronous_worker,
+        remote: FakeRemoteControl | None = None,
+        inhibitor: FakeInhibitor | None = None,
     ) -> tuple[TrayApplication, FakeGtk]:
         gtk = FakeGtk()
         available_clients = iter(clients)
@@ -125,6 +249,8 @@ class TrayApplicationTests(unittest.TestCase):
                 gtk=gtk,
                 local_timezone=UTC,
                 worker_launcher=worker,
+                remote_control=remote,
+                sleep_inhibitor=inhibitor,
             ),
             gtk,
         )
@@ -317,6 +443,223 @@ class TrayApplicationTests(unittest.TestCase):
         app._login_pending = True
         app._on_login_poll(); gtk.drain_idle()
         self.assertEqual(gtk.tray.statuses[-1][1], ("Codex sign-in failed.",))
+
+    def test_remote_control_transitions_and_action_availability(self) -> None:
+        remote = FakeRemoteControl()
+        app, gtk = self.make_application(FakeClient(), remote=remote)
+
+        app.start()
+        gtk.drain_idle()
+        self.assertEqual(remote.calls, ["status"])
+        status, values = gtk.tray.remote_statuses[-1]
+        self.assertEqual(status, "Remote Control: Stopped")
+        self.assertTrue(values["start_enabled"])
+        self.assertFalse(values["pair_enabled"])
+        self.assertTrue(values["prevent_sleep"])
+
+        app.start_remote_control()
+        gtk.drain_idle()
+        status, values = gtk.tray.remote_statuses[-1]
+        self.assertEqual(status, "Remote Control: Connected — Bhola")
+        self.assertFalse(values["start_enabled"])
+        self.assertTrue(values["stop_enabled"])
+        self.assertTrue(values["pair_enabled"])
+
+        app.stop_remote_control()
+        gtk.drain_idle()
+        self.assertEqual(gtk.tray.remote_statuses[-1][0], "Remote Control: Stopped")
+        self.assertEqual(remote.calls, ["status", "start", "stop"])
+
+    def test_remote_control_unavailable_disables_all_actions(self) -> None:
+        remote = FakeRemoteControl()
+        remote.status_failure = RemoteControlUnavailableError("unsupported")
+        app, gtk = self.make_application(FakeClient(), remote=remote)
+
+        app.start()
+        gtk.drain_idle()
+
+        status, values = gtk.tray.remote_statuses[-1]
+        self.assertEqual(status, "Remote Control: Unavailable")
+        self.assertFalse(values["start_enabled"])
+        self.assertFalse(values["stop_enabled"])
+        self.assertFalse(values["pair_enabled"])
+
+    def test_connected_remote_control_acquires_inhibitor_by_default(self) -> None:
+        remote = FakeRemoteControl()
+        remote.state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        inhibitor = FakeInhibitor()
+        app, gtk = self.make_application(
+            FakeClient(), remote=remote, inhibitor=inhibitor
+        )
+
+        app.start()
+        gtk.drain_idle()
+
+        self.assertTrue(inhibitor.is_active)
+        self.assertTrue(inhibitor.required[-1])
+        self.assertTrue(gtk.tray.remote_statuses[-1][1]["prevent_sleep"])
+        self.assertTrue(gtk.tray.remote_statuses[-1][1]["inhibitor_active"])
+
+    def test_remote_control_render_uses_only_cached_inhibitor_state(self) -> None:
+        remote = FakeRemoteControl()
+        remote.state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        inhibitor = FakeInhibitor()
+        app, gtk = self.make_application(
+            FakeClient(), remote=remote, inhibitor=inhibitor
+        )
+
+        app.start()
+        reads_after_worker = inhibitor.is_active_reads
+        gtk.drain_idle()
+        app._show_remote_control()
+
+        self.assertEqual(inhibitor.is_active_reads, reads_after_worker)
+        self.assertTrue(gtk.tray.remote_statuses[-1][1]["inhibitor_active"])
+
+    def test_user_can_disable_default_sleep_protection_for_current_session(self) -> None:
+        remote = FakeRemoteControl()
+        remote.state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        inhibitor = FakeInhibitor()
+        app, gtk = self.make_application(
+            FakeClient(), remote=remote, inhibitor=inhibitor
+        )
+        app.start()
+
+        app.set_prevent_sleep(False)
+        gtk.drain_idle()
+
+        self.assertFalse(inhibitor.is_active)
+        self.assertFalse(inhibitor.required[-1])
+        self.assertFalse(gtk.tray.remote_statuses[-1][1]["prevent_sleep"])
+        self.assertFalse(gtk.tray.remote_statuses[-1][1]["inhibitor_active"])
+
+    def test_non_connected_states_do_not_acquire_inhibitor(self) -> None:
+        for phase in (
+            RemoteControlPhase.STOPPED,
+            RemoteControlPhase.DISCONNECTED,
+            RemoteControlPhase.ERROR,
+            RemoteControlPhase.UNAVAILABLE,
+        ):
+            with self.subTest(phase=phase):
+                remote = FakeRemoteControl()
+                remote.state = RemoteControlState(phase, "Bhola")
+                inhibitor = FakeInhibitor()
+                app, gtk = self.make_application(
+                    FakeClient(), remote=remote, inhibitor=inhibitor
+                )
+
+                app.start()
+                gtk.drain_idle()
+
+                self.assertFalse(inhibitor.is_active)
+                self.assertFalse(inhibitor.required[-1])
+                self.assertFalse(
+                    gtk.tray.remote_statuses[-1][1]["inhibitor_active"]
+                )
+
+    def test_leaving_connected_state_releases_inhibitor(self) -> None:
+        for phase in (
+            RemoteControlPhase.STOPPED,
+            RemoteControlPhase.DISCONNECTED,
+            RemoteControlPhase.ERROR,
+            RemoteControlPhase.UNAVAILABLE,
+        ):
+            with self.subTest(phase=phase):
+                remote = FakeRemoteControl()
+                remote.state = RemoteControlState(
+                    RemoteControlPhase.CONNECTED, "Bhola"
+                )
+                inhibitor = FakeInhibitor()
+                app, gtk = self.make_application(
+                    FakeClient(), remote=remote, inhibitor=inhibitor
+                )
+                app.start()
+                gtk.drain_idle()
+                self.assertTrue(inhibitor.is_active)
+
+                remote.state = RemoteControlState(phase, "Bhola")
+                app.refresh_remote_control()
+                gtk.drain_idle()
+
+                self.assertFalse(inhibitor.is_active)
+                self.assertFalse(inhibitor.required[-1])
+
+    def test_quit_releases_inhibitor_without_stopping_remote_control(self) -> None:
+        remote = FakeRemoteControl()
+        remote.state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        inhibitor = FakeInhibitor()
+        app, gtk = self.make_application(
+            FakeClient(), remote=remote, inhibitor=inhibitor
+        )
+        app.start()
+        gtk.drain_idle()
+        self.assertTrue(inhibitor.is_active)
+        remote.calls.clear()
+
+        app.quit()
+        gtk.drain_idle()
+
+        self.assertEqual(inhibitor.close_calls, 1)
+        self.assertFalse(inhibitor.is_active)
+        self.assertNotIn("stop", remote.calls)
+        app._show_remote_control()
+        self.assertFalse(gtk.tray.remote_statuses[-1][1]["inhibitor_active"])
+
+    def test_inhibitor_error_is_cached_and_displayed(self) -> None:
+        remote = FakeRemoteControl()
+        remote.state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        inhibitor = FakeInhibitor()
+        inhibitor.failure = InhibitorError("sanitized test failure")
+        app, gtk = self.make_application(
+            FakeClient(), remote=remote, inhibitor=inhibitor
+        )
+
+        app.start()
+        reads_after_worker = inhibitor.is_active_reads
+        gtk.drain_idle()
+
+        values = gtk.tray.remote_statuses[-1][1]
+        self.assertTrue(values["inhibitor_error"])
+        self.assertFalse(values["inhibitor_active"])
+        self.assertEqual(inhibitor.is_active_reads, reads_after_worker)
+
+    def test_quit_releases_inhibitor_even_if_usage_client_close_fails(self) -> None:
+        client = FakeClient()
+        client.close_failure = CodexClientError("sanitized close failure")
+        inhibitor = FakeInhibitor()
+        app, gtk = self.make_application(client, inhibitor=inhibitor)
+        app.start()
+
+        app.quit()
+        gtk.drain_idle()
+
+        self.assertEqual(inhibitor.close_calls, 1)
+        self.assertEqual(gtk.quit_calls, 1)
+
+    def test_pairing_copy_claim_and_expiry_use_only_fictional_values(self) -> None:
+        remote = FakeRemoteControl()
+        remote.state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        app, gtk = self.make_application(FakeClient(), remote=remote)
+        app.start()
+        app.pair_device()
+        gtk.drain_idle()
+
+        code, on_copy, _on_new, _on_closed = gtk.pairing_dialogs[-1]
+        self.assertEqual(code, "TEST-CODE-ONLY")
+        on_copy()
+        self.assertEqual(gtk.clipboard, ["TEST-CODE-ONLY"])
+        self.assertEqual(gtk.pairing_views[-1].copied, 1)
+
+        remote.claimed = True
+        app._on_pairing_tick()
+        gtk.drain_idle()
+        self.assertEqual(gtk.pairing_views[-1].claimed, 1)
+
+        remote.artifact = PairingArtifact("TEST-EXPIRED-CODE", expires_at=1)
+        app.pair_device()
+        gtk.drain_idle()
+        app._on_pairing_tick()
+        self.assertEqual(gtk.pairing_views[-1].expired, 1)
 
 
 if __name__ == "__main__":

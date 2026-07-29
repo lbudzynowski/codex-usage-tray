@@ -31,6 +31,7 @@ from codex_usage_tray.codex_client import (
     parse_login_start_result,
     parse_rate_limit_result,
 )
+from codex_usage_tray.codex_executable import CodexExecutableResolutionError
 from codex_usage_tray.models import RateLimitSnapshot, RateLimitWindow
 
 _EOF = object()
@@ -633,8 +634,10 @@ class FailureHandlingTests(CodexClientTestCase):
 class LifecycleTests(CodexClientTestCase):
     def test_missing_path_executable_uses_a_sanitized_error(self) -> None:
         with patch(
-            "codex_usage_tray.codex_client.shutil.which",
-            return_value=None,
+            "codex_usage_tray.codex_executable.resolve_codex_executable",
+            side_effect=CodexExecutableResolutionError(
+                "private executable path must not escape"
+            ),
         ):
             with self.assertRaises(CodexExecutableNotFoundError) as raised:
                 build_codex_command()
@@ -646,12 +649,12 @@ class LifecycleTests(CodexClientTestCase):
 
     def test_default_command_uses_path_lookup_and_disables_analytics(self) -> None:
         with patch(
-            "codex_usage_tray.codex_client.shutil.which",
+            "codex_usage_tray.codex_executable.resolve_codex_executable",
             return_value="/resolved/codex",
-        ) as which:
+        ) as resolver:
             command = build_codex_command()
 
-        which.assert_called_once_with("codex")
+        resolver.assert_called_once_with()
         self.assertEqual(
             command,
             ("/resolved/codex", "-c", "analytics.enabled=false", "app-server"),
