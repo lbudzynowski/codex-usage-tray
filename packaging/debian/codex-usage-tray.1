@@ -9,6 +9,10 @@ starts an unofficial GTK 3 AppIndicator application that reads account state
 and usage limits from the local OpenAI Codex app-server. It displays the
 remaining allowance in the Ubuntu GNOME top panel.
 .PP
+The menu also manages the experimental Codex Remote Control daemon, displays
+its connection state and host name, and supports short-lived manual device
+pairing codes.
+.PP
 OpenAI Codex must be installed separately. If Codex is signed out, the tray
 displays a sign-in-required state and offers a Sign in to Codex... action that
 starts the official Codex-managed ChatGPT browser flow. Users may also run
@@ -28,6 +32,27 @@ Codex-managed browser authentication flow.
 Checks account state and usage limits immediately. An automatic refresh also
 runs every five minutes.
 .TP
+.B Start Remote Control
+Starts the managed Codex app-server daemon with Remote Control enabled.
+.TP
+.B Stop Remote Control
+Stops the managed Remote Control daemon.
+.TP
+.B Pair a device...
+Displays an in-memory, short-lived manual code for the ChatGPT mobile app.
+Pairing artifacts are not logged or persisted by this application.
+.TP
+.B Prevent sleep while Remote Control is active
+Enabled by default. Uses systemd-inhibit to block automatic suspend and logind
+idle sleep only while Remote Control is connected. It can be disabled for the
+current tray session. Screen blanking and locking remain enabled.
+.PP
+The tray does not modify laptop-lid configuration. Lid-close behavior remains
+controlled by the operating system, and the inhibitor may be respected or
+ignored depending on settings such as LidSwitchIgnoreInhibited. Do not assume
+that closing the lid will preserve Remote Control. Never place the laptop in a
+bag while it remains powered and awake.
+.TP
 .B Quit
 Stops the current tray process. The system autostart entry starts a new process
 at the next desktop login while that entry remains enabled.
@@ -37,12 +62,22 @@ The application communicates with a local
 subprocess to request account state and usage limits. It does not scrape
 ChatGPT pages.
 .PP
+Remote Control status uses the official local app-server control socket through
+.BR "codex app-server proxy" .
+Lifecycle and pairing use the official
+.B codex remote-control
+commands. The tray does not open a network port.
+.PP
 Codex Usage Tray does not directly read authentication tokens, browser cookies,
 browser data, or Codex authentication files such as
 .IR ~/.codex/auth.json .
 Codex manages authentication and any network communication it requires. The
 account email and plan returned by Codex are held in memory and displayed
 locally; this application does not store or log them.
+.PP
+Pairing codes, opaque pairing payloads, and environment identifiers are held
+only in memory. No QR is generated because the public Codex protocol does not
+currently define its opaque pairingCode as a QR scanner payload.
 .SH DIAGNOSTICS
 If the tray reports Usage unavailable, verify that Codex is available to the
 desktop session with
@@ -56,13 +91,23 @@ in a terminal.
 Do not include credentials or authentication-file contents in bug reports.
 Useful details are the package version, Ubuntu version, desktop environment,
 and the displayed status message.
+.PP
+For Remote Control diagnostics, verify that
+.BR "codex remote-control --help" ,
+.BR "codex remote-control start --help" ,
+.BR "codex remote-control pair --help" ,
+and
+.B codex app-server proxy --help
+are available. Remote Control is experimental; Codex CLI 0.146.0 is the tested
+version, and incompatible versions are displayed as unavailable.
 .SH FILES
 .TP
 .I /etc/xdg/autostart/codex-usage-tray.desktop
 System-wide autostart entry used to launch the application after login.
 .SH REQUIREMENTS
-Python 3.11 or newer, GTK 3, PyGObject, Ayatana AppIndicator, and a separately
-installed and authenticated OpenAI Codex.
+Python 3.11 or newer, GTK 3, PyGObject, Ayatana AppIndicator, systemd-inhibit,
+and a separately installed and authenticated OpenAI Codex CLI 0.146.0 or a
+compatible version.
 .SH DISCLAIMER
 Codex Usage Tray is an unofficial community application and is not affiliated
 with or endorsed by OpenAI.
