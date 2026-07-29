@@ -1,4 +1,4 @@
-.TH CODEX-USAGE-TRAY 1 "July 2026" "codex-usage-tray 0.2.0" "User Commands"
+.TH CODEX-USAGE-TRAY 1 "July 2026" "codex-usage-tray 0.2.1" "User Commands"
 .SH NAME
 codex-usage-tray \- display OpenAI Codex usage limits in the Ubuntu system tray
 .SH SYNOPSIS
@@ -100,6 +100,14 @@ and
 .B codex app-server proxy --help
 are available. Remote Control is experimental; Codex CLI 0.146.0 is the tested
 version, and incompatible versions are displayed as unavailable.
+.SH ENVIRONMENT
+.TP
+.B CODEX_EXECUTABLE
+Optional path to an executable Codex CLI file. A valid override is used for
+both usage limits and Remote Control. Otherwise the tray prefers
+.I $HOME/.local/bin/codex
+before performing a normal PATH lookup. An invalid explicit override is
+reported as unavailable without displaying its path.
 .SH FILES
 .TP
 .I /etc/xdg/autostart/codex-usage-tray.desktop

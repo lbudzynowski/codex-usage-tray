@@ -22,6 +22,11 @@ developer's credentials, account tokens, browser cookies, or any bundled
 credential material. Each operating-system user uses their own local Codex
 authentication managed by Codex.
 
+Both usage limits and Remote Control use the same Codex executable. A valid
+executable named by `CODEX_EXECUTABLE` takes priority, followed by
+`$HOME/.local/bin/codex`, then the first `codex` found on the normal `PATH`.
+An invalid explicit override is rejected without exposing its path in the UI.
+
 ## Authentication
 
 Codex Usage Tray does not implement authentication itself and does not read
@@ -46,11 +51,11 @@ restart.
 
 Download the latest `.deb` package from GitHub Releases and install it with:
 
-    sudo apt install ./codex-usage-tray_0.2.0_all.deb
+    sudo apt install ./codex-usage-tray_0.2.1_all.deb
 
 To upgrade from a downloaded package, run the same command with the new file:
 
-    sudo apt install ./codex-usage-tray_0.2.0_all.deb
+    sudo apt install ./codex-usage-tray_0.2.1_all.deb
 
 Start the application immediately with:
 

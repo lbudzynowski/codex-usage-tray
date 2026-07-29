@@ -6,7 +6,6 @@ import base64
 import json
 import os
 import select
-import shutil
 import struct
 import subprocess
 import time
@@ -16,6 +15,8 @@ from enum import Enum
 from typing import IO, Protocol
 
 from . import __version__
+from . import codex_executable
+from .codex_executable import CodexExecutableResolutionError
 from .pairing import PairingArtifact, PairingError
 
 
@@ -162,17 +163,27 @@ class RemoteControlClient:
         proxy_factory: ProxyFactory = _spawn_proxy,
         timeout: float = 12.0,
         executable: str | None = None,
+        executable_resolver: Callable[[], str] | None = None,
     ) -> None:
         self._command_runner = command_runner
         self._proxy_factory = proxy_factory
         self._timeout = timeout
         self._executable = executable
+        self._executable_resolver = executable_resolver
 
     def _codex(self) -> str:
-        executable = self._executable or shutil.which("codex")
-        if executable is None:
-            raise RemoteControlUnavailableError("Codex executable was not found in PATH")
-        return executable
+        if self._executable is not None:
+            return self._executable
+        resolver = (
+            self._executable_resolver
+            or codex_executable.resolve_codex_executable
+        )
+        try:
+            return resolver()
+        except (CodexExecutableResolutionError, OSError, ValueError):
+            raise RemoteControlUnavailableError(
+                "Codex executable was not found in PATH"
+            ) from None
 
     def _json_command(self, arguments: Sequence[str], *, secret: bool = False) -> object:
         result = self._command_runner((self._codex(), *arguments), self._timeout)

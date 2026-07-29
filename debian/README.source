@@ -2,7 +2,7 @@ Codex Usage Tray source packages for Launchpad
 ==============================================
 
 The package uses Debian source format 3.0 (quilt).  The upstream archive is
-created directly from the immutable v0.2.0 Git tag and therefore excludes the
+created directly from the immutable v0.2.1 Git tag and therefore excludes the
 Debian packaging directory.  Do not use the pre-built .deb from GitHub Releases
 for PPA uploads; Launchpad accepts the signed source upload and builds binaries
 itself.
@@ -14,8 +14,8 @@ packages for both supported Ubuntu LTS series:
     debian/build-ppa-source resolute
 
 The generated files are placed below build/ppa/<series>/.  Noble uses
-0.2.0-1~ppa1~noble1 and includes the shared upstream orig.tar.xz.  Resolute uses
-0.2.0-1~ppa1~resolute1 and its _source.changes omits the
+0.2.1-1~ppa1~noble1 and includes the shared upstream orig.tar.xz.  Resolute uses
+0.2.1-1~ppa1~resolute1 and its _source.changes omits the
 already-uploaded orig archive.  Upload Noble first and wait for Launchpad to
 accept it before uploading Resolute.
 

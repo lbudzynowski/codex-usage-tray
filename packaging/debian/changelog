@@ -1,3 +1,13 @@
+codex-usage-tray (0.2.1) unstable; urgency=medium
+
+  * Resolve one Codex executable for usage limits and Remote Control.
+  * Prefer a valid explicit override, then the user-local Codex installation.
+  * Keep invalid executable details out of user-visible errors.
+  * Preserve user-first PATH ordering in the packaged launcher.
+  * Expand executable-selection coverage to 122 passing tests.
+
+ -- Łukasz Budzynowski <lbudzynowski@gmail.com>  Wed, 29 Jul 2026 21:07:46 +0200
+
 codex-usage-tray (0.2.0) unstable; urgency=medium
 
   * Add passive Codex Remote Control status and explicit daemon lifecycle actions.

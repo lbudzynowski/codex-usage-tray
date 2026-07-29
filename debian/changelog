@@ -1,3 +1,12 @@
+codex-usage-tray (0.2.1-1~ppa1~noble1) noble; urgency=medium
+
+  * Package the shared, user-first Codex executable resolver.
+  * Honor valid CODEX_EXECUTABLE overrides without exposing invalid paths.
+  * Fix launcher PATH ordering for user-local Codex installations.
+  * Validate executable selection with the complete 122-test suite.
+
+ -- Łukasz Budzynowski <lbudzynowski@gmail.com>  Wed, 29 Jul 2026 21:07:46 +0200
+
 codex-usage-tray (0.2.0-1~ppa1~noble1) noble; urgency=medium
 
   * Package the 0.2.0 Codex Remote Control status and lifecycle integration.
