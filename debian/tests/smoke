@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-python3 -c 'import codex_usage_tray; assert codex_usage_tray.__version__ == "0.1.1"'
+python3 -c 'import codex_usage_tray; assert codex_usage_tray.__version__ == "0.2.0"'
 test -x /usr/bin/codex-usage-tray
 test -f /etc/xdg/autostart/codex-usage-tray.desktop
 test -f /usr/share/man/man1/codex-usage-tray.1.gz

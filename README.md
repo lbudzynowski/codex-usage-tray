@@ -46,11 +46,11 @@ restart.
 
 Download the latest `.deb` package from GitHub Releases and install it with:
 
-    sudo apt install ./codex-usage-tray_0.1.1_all.deb
+    sudo apt install ./codex-usage-tray_0.2.0_all.deb
 
 To upgrade from a downloaded package, run the same command with the new file:
 
-    sudo apt install ./codex-usage-tray_0.1.1_all.deb
+    sudo apt install ./codex-usage-tray_0.2.0_all.deb
 
 Start the application immediately with:
 

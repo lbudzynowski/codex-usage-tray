@@ -9,11 +9,11 @@ fi
 series="$1"
 case "$series" in
     noble)
-        package_version="0.1.1-1~ppa1~noble1"
+        package_version="0.2.0-1~ppa1~noble1"
         orig_option="-sa"
         ;;
     resolute)
-        package_version="0.1.1-1~ppa1~resolute1"
+        package_version="0.2.0-1~ppa1~resolute1"
         orig_option="-sd"
         ;;
     *)
@@ -23,7 +23,7 @@ case "$series" in
 esac
 
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-upstream_version="0.1.1"
+upstream_version="0.2.0"
 upstream_tag="v${upstream_version}"
 source_name="codex-usage-tray"
 source_dir_name="${source_name}-${upstream_version}"

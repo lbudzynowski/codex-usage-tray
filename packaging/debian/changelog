@@ -1,3 +1,14 @@
+codex-usage-tray (0.2.0) unstable; urgency=medium
+
+  * Add passive Codex Remote Control status and explicit daemon lifecycle actions.
+  * Add short-lived manual device pairing held only in application memory.
+  * Enable sleep inhibition by default while Remote Control is connected.
+  * Serialize inhibitor lifecycle operations and keep GTK rendering non-blocking.
+  * Keep pairing artifacts private and document the unsupported QR contract.
+  * Expand Remote Control, security, and privacy coverage to 115 passing tests.
+
+ -- Łukasz Budzynowski <lbudzynowski@gmail.com>  Wed, 29 Jul 2026 20:38:50 +0200
+
 codex-usage-tray (0.1.1) unstable; urgency=medium
 
   * Detect signed-in and signed-out Codex account states before reading limits.

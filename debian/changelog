@@ -1,3 +1,13 @@
+codex-usage-tray (0.2.0-1~ppa1~noble1) noble; urgency=medium
+
+  * Package the 0.2.0 Codex Remote Control status and lifecycle integration.
+  * Add private in-memory manual pairing and default-on sleep inhibition.
+  * Include inhibitor concurrency and non-blocking GTK responsiveness fixes.
+  * Document security, privacy, and the intentionally unsupported QR contract.
+  * Validate the release with the complete 115-test suite.
+
+ -- Łukasz Budzynowski <lbudzynowski@gmail.com>  Wed, 29 Jul 2026 20:38:50 +0200
+
 codex-usage-tray (0.1.1-1~ppa1~noble1) noble; urgency=medium
 
   * Add standards-compliant Debian source packaging for Launchpad PPA builds.
