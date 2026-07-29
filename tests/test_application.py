@@ -15,6 +15,7 @@ from codex_usage_tray.remote_control import (
     RemoteControlState,
     RemoteControlUnavailableError,
 )
+from codex_usage_tray.sleep_inhibitor import InhibitorError
 
 
 class FakeTray:
@@ -206,17 +207,26 @@ class FakeRemoteControl:
 
 class FakeInhibitor:
     def __init__(self) -> None:
-        self.is_active = False
+        self._is_active = False
+        self.is_active_reads = 0
         self.required: list[bool] = []
         self.close_calls = 0
+        self.failure: Exception | None = None
+
+    @property
+    def is_active(self) -> bool:
+        self.is_active_reads += 1
+        return self._is_active
 
     def set_required(self, required: bool) -> None:
         self.required.append(required)
-        self.is_active = required
+        if self.failure is not None:
+            raise self.failure
+        self._is_active = required
 
     def close(self) -> None:
         self.close_calls += 1
-        self.is_active = False
+        self._is_active = False
 
 
 def synchronous_worker(callback: object) -> None:
@@ -488,6 +498,23 @@ class TrayApplicationTests(unittest.TestCase):
         self.assertTrue(inhibitor.is_active)
         self.assertTrue(inhibitor.required[-1])
         self.assertTrue(gtk.tray.remote_statuses[-1][1]["prevent_sleep"])
+        self.assertTrue(gtk.tray.remote_statuses[-1][1]["inhibitor_active"])
+
+    def test_remote_control_render_uses_only_cached_inhibitor_state(self) -> None:
+        remote = FakeRemoteControl()
+        remote.state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        inhibitor = FakeInhibitor()
+        app, gtk = self.make_application(
+            FakeClient(), remote=remote, inhibitor=inhibitor
+        )
+
+        app.start()
+        reads_after_worker = inhibitor.is_active_reads
+        gtk.drain_idle()
+        app._show_remote_control()
+
+        self.assertEqual(inhibitor.is_active_reads, reads_after_worker)
+        self.assertTrue(gtk.tray.remote_statuses[-1][1]["inhibitor_active"])
 
     def test_user_can_disable_default_sleep_protection_for_current_session(self) -> None:
         remote = FakeRemoteControl()
@@ -504,6 +531,7 @@ class TrayApplicationTests(unittest.TestCase):
         self.assertFalse(inhibitor.is_active)
         self.assertFalse(inhibitor.required[-1])
         self.assertFalse(gtk.tray.remote_statuses[-1][1]["prevent_sleep"])
+        self.assertFalse(gtk.tray.remote_statuses[-1][1]["inhibitor_active"])
 
     def test_non_connected_states_do_not_acquire_inhibitor(self) -> None:
         for phase in (
@@ -525,6 +553,9 @@ class TrayApplicationTests(unittest.TestCase):
 
                 self.assertFalse(inhibitor.is_active)
                 self.assertFalse(inhibitor.required[-1])
+                self.assertFalse(
+                    gtk.tray.remote_statuses[-1][1]["inhibitor_active"]
+                )
 
     def test_leaving_connected_state_releases_inhibitor(self) -> None:
         for phase in (
@@ -571,6 +602,26 @@ class TrayApplicationTests(unittest.TestCase):
         self.assertEqual(inhibitor.close_calls, 1)
         self.assertFalse(inhibitor.is_active)
         self.assertNotIn("stop", remote.calls)
+        app._show_remote_control()
+        self.assertFalse(gtk.tray.remote_statuses[-1][1]["inhibitor_active"])
+
+    def test_inhibitor_error_is_cached_and_displayed(self) -> None:
+        remote = FakeRemoteControl()
+        remote.state = RemoteControlState(RemoteControlPhase.CONNECTED, "Bhola")
+        inhibitor = FakeInhibitor()
+        inhibitor.failure = InhibitorError("sanitized test failure")
+        app, gtk = self.make_application(
+            FakeClient(), remote=remote, inhibitor=inhibitor
+        )
+
+        app.start()
+        reads_after_worker = inhibitor.is_active_reads
+        gtk.drain_idle()
+
+        values = gtk.tray.remote_statuses[-1][1]
+        self.assertTrue(values["inhibitor_error"])
+        self.assertFalse(values["inhibitor_active"])
+        self.assertEqual(inhibitor.is_active_reads, reads_after_worker)
 
     def test_quit_releases_inhibitor_even_if_usage_client_close_fails(self) -> None:
         client = FakeClient()

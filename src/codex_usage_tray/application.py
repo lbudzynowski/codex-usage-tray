@@ -115,6 +115,7 @@ class TrayApplication:
         # Default to protecting an active Remote Control connection. This is a
         # per-process preference; the user can turn it off from the tray menu.
         self._prevent_sleep = True
+        self._inhibitor_active = False
         self._inhibitor_error = False
         self._pairing_session: PairingSession | None = None
         self._pairing_view: PairingView | None = None
@@ -427,7 +428,13 @@ class TrayApplication:
                 inhibitor_error = True
             else:
                 inhibitor_error = False
+            try:
+                inhibitor_active = bool(inhibitor.is_active)
+            except (InhibitorError, OSError, RuntimeError):
+                inhibitor_active = False
+                inhibitor_error = True
             with self._lock:
+                self._inhibitor_active = inhibitor_active
                 self._inhibitor_error = inhibitor_error
         self._gtk.idle_add(self._show_remote_control)
 
@@ -462,12 +469,22 @@ class TrayApplication:
                 client.close()
         except (CodexClientError, OSError, RuntimeError):
             pass
-        try:
-            if self._sleep_inhibitor is not None:
-                with self._inhibitor_sync_lock:
-                    self._sleep_inhibitor.close()
-        except (InhibitorError, OSError, RuntimeError):
-            pass
+        inhibitor = self._sleep_inhibitor
+        inhibitor_active = False
+        inhibitor_error = False
+        if inhibitor is not None:
+            with self._inhibitor_sync_lock:
+                try:
+                    inhibitor.close()
+                except (InhibitorError, OSError, RuntimeError):
+                    inhibitor_error = True
+                    try:
+                        inhibitor_active = bool(inhibitor.is_active)
+                    except (InhibitorError, OSError, RuntimeError):
+                        inhibitor_active = False
+        with self._lock:
+            self._inhibitor_active = inhibitor_active
+            self._inhibitor_error = inhibitor_error
         self._gtk.idle_add(self._gtk.main_quit)
 
     def _set_remote_state(self, state: RemoteControlState) -> None:
@@ -481,10 +498,8 @@ class TrayApplication:
         with self._lock:
             state = self._remote_state
             prevent_sleep = self._prevent_sleep
+            inhibitor_active = self._inhibitor_active
             inhibitor_error = self._inhibitor_error
-        inhibitor_active = bool(
-            self._sleep_inhibitor is not None and self._sleep_inhibitor.is_active
-        )
         self._tray.show_remote_control(
             _format_remote_state(state),
             start_enabled=state.phase
