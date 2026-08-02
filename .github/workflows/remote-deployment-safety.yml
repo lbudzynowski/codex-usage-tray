@@ -1,0 +1,75 @@
+name: Remote deployment safety
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/**']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject unsafe remote workflow patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          errors = []
+          root = Path('.github/workflows')
+          current = root / 'remote-deployment-safety.yml'
+
+          for path in sorted(root.glob('*.y*ml')):
+              if path == current:
+                  continue
+              text = path.read_text(encoding='utf-8')
+              lines = text.splitlines()
+              if re.search(r'@(?:unlink|rmdir)\s*\(', text):
+                  errors.append(f'{path}: silent self-deletion is forbidden')
+              if 'register_shutdown_function' in text and re.search(r'\b(?:unlink|rmdir)\s*\(', text):
+                  errors.append(f'{path}: shutdown-time self-deletion is not cleanup evidence')
+              index = 0
+              while index < len(lines):
+                  match = re.search(r"\blftp\b.*<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)", lines[index])
+                  if not match:
+                      index += 1
+                      continue
+                  terminator = match.group(1)
+                  end = index + 1
+                  while end < len(lines) and lines[end].strip() != terminator:
+                      end += 1
+                  if end >= len(lines):
+                      errors.append(f'{path}:{index + 1}: unterminated lftp block')
+                      break
+                  block = lines[index + 1:end]
+                  tail = '\n'.join(lines[end + 1:])
+                  if any(command.strip() == 'pwd' for command in block):
+                      errors.append(f'{path}:{index + 1}: lftp pwd may expose credentials')
+                  writes = any(re.match(r'^\s*(?:put|mput|mirror\s+--reverse)\b', command) for command in block)
+                  deletes = any(re.match(r'^\s*rm\b', command) for command in block)
+                  if writes and not (
+                      re.search(r'(?mi)^\s*-\s+name:\s+.*\b(?:verify|validate|smoke|sprawd)', tail)
+                      and re.search(r'\b(?:curl|wget|sha256sum|cmp|get)\b', tail)
+                      and re.search(r'\b(?:test|grep|cmp|python3?)\b|sha256sum\s+--check', tail)
+                  ):
+                      errors.append(f'{path}:{index + 1}: upload lacks independent readback and assertion')
+                  if deletes and not re.search(r'(?i)(?:404|410).*status|status.*(?:404|410)|remote-cleanup-proof', tail):
+                      errors.append(f'{path}:{index + 1}: deletion lacks explicit absence proof')
+                  index = end + 1
+          if errors:
+              print('\n'.join(f'::error::{error}' for error in errors), file=sys.stderr)
+              raise SystemExit(1)
+          print('Remote workflow safety policy passed.')
+          PY
